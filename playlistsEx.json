@@ -1,0 +1,26 @@
+
+[
+    {
+        "id" : 0,
+        "type" : "artist mix",
+        "name" : "playlist name",
+        "desc" : "playlist description",
+        "data" :{
+            "artists": [
+                "artist name 1",
+                "artist name 2",
+                "artist name 3"
+            ]
+        }
+    },
+    {
+        "id" : 1,
+        "type" : "decades mix",
+        "name" : "playlist name",
+        "desc" : "playlist description",
+        "data" :{
+            "start time":"YYYY-MM-DD",
+            "end time": "YYYY-MM-DD"
+        }
+    }
+]

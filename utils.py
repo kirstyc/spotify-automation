@@ -55,36 +55,57 @@ class SpotifyUtils():
             raise ResponseException(response.status_code)
 
     ###################
+    # general send utils
+    ###################
+
+    def sendRequestLimited(self, data, limit, playlistId, sendCallback):
+        # TODO Compare this with get request limited
+        dataMatrix = [data[i:i+limit] for i in range(0, len(data), limit)]
+
+        for data in dataMatrix:
+           sendCallback(playlistId, data)
+
+        return
+
+    ###################
     # Get Playlist Info 
     ###################
 
-    def getSavedTracks(self, numSongs):
-        '''
-        returns latest saved tracks from user 
-        '''
-
-        query = "https://api.spotify.com/v1/me/tracks"
-        queryParams = {
-            "limit" : numSongs
-        }
+    def getSavedTrackRequest(self, query):
 
         response = requests.get(
             query,
-            params = queryParams,
             headers = self.headers
         )
         responseJson = self.unpack(response)
 
-        return responseJson['items']
+        return responseJson
 
-    def getSavedTrackUris(self, numSongs):
+    def getAllTracks(self, pageCallback):
+        songLimit = 50 
+        query = f"https://api.spotify.com/v1/me/tracks?limit={songLimit}"
+        while query is not None:
+            print(f"GET {query}")
+            response = self.getSavedTrackRequest(query)
+            pageCallback(response['items'])
+            query = response['next']
+         
+    def getLatestTracks(self, numSongs):
+        # TODO retest 
+        query = f"https://api.spotify.com/v1/me/tracks?limit={numSongs}"
+        response = self.getSavedTrackRequest(query)
+        items = response['items']
+
+        return items
+
+    def getLatestTrackUris(self, numSongs):
         '''
         returns spotify uris of the latest saved tracks 
         '''
-        tracks = self.getSavedTracks(numSongs)
+        tracks = self.getLatestTracks(numSongs)
         uris = []
         for item in tracks:
-            uris.append(item['track']['uri'])
+            uris.append(self.getSongUriFromTrack(item))
         
         return uris
 
@@ -96,6 +117,7 @@ class SpotifyUtils():
         '''
         returns all data related to playlists
         '''
+        # TODO check if this has fields
         query = "https://api.spotify.com/v1/me/playlists"
 
         response = requests.get(
@@ -128,16 +150,25 @@ class SpotifyUtils():
         
         return names 
 
+    def getPlaylistIdFromName(self, name):
+        names = self.getPlaylistNames()
+        return names[name]
+
     ###################
     # Get Specific Playlist Info 
     ###################
 
-    def getPlaylistItems(self, playlistId, trackLimit = 100):
+    def getPlaylistItemsRequest(self, playlistId, trackLimit = 100, fields = None, query = None):
 
-        query = f'https://api.spotify.com/v1/playlists/{playlistId}/tracks'
+        if query is None:
+            query = f'https://api.spotify.com/v1/playlists/{playlistId}/tracks'
         queryParams = {
             'limit' : trackLimit
         }
+
+        # can specify fields to get specific info
+        if fields is not None:
+            queryParams['fields'] = fields
 
         response = requests.get(
             query,
@@ -145,44 +176,40 @@ class SpotifyUtils():
             headers = self.headers
         )
         responseJson = self.unpack(response)
-        return responseJson['items']
+        return responseJson
+
+    def getPlaylistItemsAll(self, playlistId, itemFields):
+
+        items = []
+        f = itemFields + ',next'
+        q = None
+        nextUrl  = True
+        while nextUrl is not None:
+            response = self.getPlaylistItemsRequest(playlistId, fields = f, query = q)
+            items += response['items']
+            nextUrl = response['next']
+            q = nextUrl
+
+        return items 
 
     def getPlaylistUris(self, playlistId, trackLimit = 100):
-        playlistItems = self.getPlaylistItems(playlistId, trackLimit)
+        itemFields = 'items.track.uri'
+        playlistItems = self.getPlaylistItemsAll(playlistId, itemFields)
         uris = []
         for item in playlistItems:
-            uris.append(item['track']['uri'])
+            uris.append(self.getSongUriFromTrack(item))
         return uris
 
     def getPlaylistAddDates(self, playlistId, trackLimit = 100):
         '''
         returns {'add date':uri} for tracks in playlist
         '''
-        playlistItems = self.getPlaylistItems(playlistId, trackLimit)
+        itemFields = 'items(added_at,track(uri))'
+        playlistItems = self.getPlaylistItemsAll(playlistId, itemFields)
         dates = {}
         for item in playlistItems:
-            dates[item['added_at']] = item['track']['uri']
+            dates[item['added_at']] = self.getSongUriFromTrack(item)
         return dates
-
-    ###################
-    # Get Song Info 
-    ###################
-
-    def getSpotifyUri(self, songTitle, artist):
-
-        query = f"https://api.spotify.com/v1/search?query=track%3A{songTitle}+artist%3A{artist}&type=track&offset=0&limit=20"
-        
-        response = requests.get(
-            query,
-            headers= self.headers
-        )
-        responseJson = self.unpack(response)
-
-        songs = responseJson["tracks"]["items"]
-        # only use the first song
-        uri = songs[0]["uri"]
-
-        return uri
 
     ###################
     # Sets Playlist Data
@@ -212,6 +239,13 @@ class SpotifyUtils():
 
     def addSongs(self, playlistId, uris):
 
+        # can only add 100 songs at a time 
+        songLimit = 100
+        self.sendRequestLimited(uris, songLimit, playlistId, self.addSongsRequest)
+
+        return 
+
+    def addSongsRequest(self, playlistId, uris):
         query = f"https://api.spotify.com/v1/playlists/{playlistId}/tracks"
 
         uris = json.dumps(uris)
@@ -225,6 +259,11 @@ class SpotifyUtils():
         return self.unpack(response)
 
     def removeSongs(self, playlistId, uris):
+        songLimit = 100 
+        self.sendRequestLimited(uris, songLimit, playlistId, self.removeSongsRequest)
+        return 
+
+    def removeSongsRequest(self, playlistId, uris):
 
         query = f"https://api.spotify.com/v1/playlists/{playlistId}/tracks"
 
@@ -237,3 +276,72 @@ class SpotifyUtils():
         )
 
         return self.unpack(response)
+
+
+    ###################
+    # Get Song Info 
+    ###################
+
+    def searchSpotify(self, songTitle, artist):
+
+        query = f"https://api.spotify.com/v1/search?query=track%3A{songTitle}+artist%3A{artist}&type=track&offset=0&limit=20"
+        
+        response = requests.get(
+            query,
+            headers= self.headers
+        )
+        responseJson = self.unpack(response)
+
+        songs = responseJson["tracks"]["items"]
+        # only use the first song
+        uri = songs[0]["uri"]
+
+        return uri
+
+    def getSongUriFromTrack(self, track):
+        try:
+            track = track['track']
+        except:
+            pass
+        
+        return track['uri']
+
+    ###################
+    # Get Artist Info 
+    ###################
+
+    def getArtistUri(self, artist):
+
+        query = f"https://api.spotify.com/v1/search?q={artist}&type=artist"
+
+        response = requests.get(
+            query,
+            headers= self.headers
+        )
+        responseJson = self.unpack(response)
+
+        artists = responseJson["artists"]["items"]
+        uri = artists[0]["uri"]
+
+        return uri 
+
+    def getArtistUris(self, artists):
+        
+        uris = [self.getArtistUri(artist) for artist in artists]
+        return uris 
+
+    def getArtistFromTrack(self, track):
+        '''
+        extracts artist uri from track object 
+        '''
+        try:
+            track = track['track']
+        except:
+            pass
+        
+        uris = []
+        for artist in track['artists']:
+            uris.append(artist['uri'])
+
+        return uris
+
