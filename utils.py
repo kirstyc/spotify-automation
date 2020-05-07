@@ -59,7 +59,6 @@ class SpotifyUtils():
     ###################
 
     def sendRequestLimited(self, data, limit, playlistId, sendCallback):
-        # TODO Compare this with get request limited
         dataMatrix = [data[i:i+limit] for i in range(0, len(data), limit)]
 
         for data in dataMatrix:
@@ -81,7 +80,7 @@ class SpotifyUtils():
 
         return responseJson
 
-    def getAllTracks(self, pageCallback):
+    def searchLibrary(self, pageCallback):
         songLimit = 50 
         query = f"https://api.spotify.com/v1/me/tracks?limit={songLimit}"
         while query is not None:
@@ -117,22 +116,22 @@ class SpotifyUtils():
         '''
         returns all data related to playlists
         '''
-        # TODO check if this has fields
-        query = "https://api.spotify.com/v1/me/playlists"
+        query = "https://api.spotify.com/v1/me/playlists?limit=50"
+        playlistItems = []
 
-        response = requests.get(
-            query,
-            headers = self.headers
-        )
-
-        return self.unpack(response)
+        while query is not None:
+            response = self.getSavedTrackRequest(query)
+            playlistItems += response['items']
+            query = response['next']
+       
+        return playlistItems
 
     def getPlaylistTotal(self):
         '''
         gets the total number of user playlists
         '''
         playlists = self.getPlaylists()
-        return playlists['total']
+        return len(playlists)
 
     def getPlaylistNames(self):
         '''
@@ -143,7 +142,7 @@ class SpotifyUtils():
         '''
         playlists = self.getPlaylists()
         names = {}
-        for item in playlists['items']:
+        for item in playlists:
             key = item['name']
             val = item['id']
             names[key] = val

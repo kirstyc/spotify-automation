@@ -19,8 +19,8 @@
         "name" : "playlist name",
         "desc" : "playlist description",
         "data" :{
-            "start time":"YYYY-MM-DD",
-            "end time": "YYYY-MM-DD"
+            "start year":"YYYY",
+            "end year": "YYYY"
         }
     }
 ]

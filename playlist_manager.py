@@ -1,4 +1,8 @@
 import json
+import re
+import datetime
+import time
+
 from utils import SpotifyUtils
 
 class Playlist():
@@ -65,7 +69,8 @@ class PlaylistManager():
 
     def getPlaylistClass(self, playlistType):
         types = {
-            'artist mix':ArtistMix
+            'artist mix':ArtistMix,
+            'decades mix':DecadesMix
         }            
         
         playlistClass = types[playlistType]
@@ -91,25 +96,17 @@ class RecentPlaylist(Playlist):
         latestUris = self.spotify.getLatestTrackUris(self.numSongs)
         print(f"got {self.numSongs} latest saved tracks")
 
-        # check which tracks are new to playlist 
+        # get and clear playlist tracks 
         playlistUris = self.spotify.getPlaylistUris(self.playlistId)
         print(f"got current tracks from {self.name}")
-        missingUris = self.missingUris(latestUris, playlistUris)
-        print(f"{len(missingUris)} new tracks to add")
-
-        # remove old songs
-        numRemove = abs(self.numSongs - len(playlistUris) - len(missingUris))
-        if numRemove > 0:
-            datesAddedDict = self.spotify.getPlaylistAddDates(self.playlistId)
-            datesAdded = list(datesAddedDict.keys()).sort()
-            oldDates = datesAdded[:numRemove]
-            removeUris = [datesAddedDict[date] for date in oldDates]
-            self.spotify.removeSongs(self.playlistId, removeUris)
-            print(f"{numRemove} old songs removed")
+        self.spotify.removeSongs(self.playlistId, playlistUris)
+        print(f"removing old tracks")
 
         # add new songs 
-        self.spotify.addSongs(self.playlistId, missingUris)
+        self.spotify.addSongs(self.playlistId, latestUris)
+
         print("added new tracks")
+        print("done")
 
 
 class ArtistMix(Playlist):
@@ -151,7 +148,7 @@ class ArtistMix(Playlist):
         # tracks from library are given in pages of info, max 50 items each iteration 
         # search page results for artist uri
         # add song uri to artist key if match found 
-        self.spotify.getAllTracks(self.callback)
+        self.spotify.searchLibrary(self.callback)
 
         # concatenate artist uris and remove duplicates 
         artistSongs = []
@@ -176,13 +173,71 @@ class ArtistMix(Playlist):
                     self.artistSongDict[uri].append(songUri)
 
 
+class DecadesMix(Playlist):
+    
+    def __init__(self, data, playlistName, desc = "", public = False):
+        super().__init__(playlistName, desc, public)
+        self.yearStart, self.yearEnd = self.unpackData(data)
+
+    def unpackData(self, data):
+        # get start year 
+        # if start year not specified set fields to zero 
+        try: 
+            yearStart = int(data['start year'])
+        except:
+            yearStart = 0
+
+        # get end year 
+        # if none specified, take today 
+        try: 
+            yearEnd = int(data['end year'])
+        except:
+            now = datetime.datetime.now()
+            yearEnd = now.year
+        
+        return yearStart, yearEnd
+    
+    def update(self):
+
+        # search library for matches 
+        songUris = self.getDecadeUris()
+
+        # get playlist track uris 
+        playlistUris = self.spotify.getPlaylistUris(self.playlistId)
+        print('got playlist uris')
+
+        # check missing uris 
+        missingUris = self.missingUris(songUris, playlistUris)
+        print(f"adding {len(missingUris)} new songs")
+
+        # add missing uris 
+        self.spotify.addSongs(self.playlistId, missingUris)
+        print("done")
+
+    def getDecadeUris(self):
+
+        # search library for track release date within bounds
+        self.matches = []
+        self.spotify.searchLibrary(self.timeMatchCallback)
+        return self.matches
+
+    def timeMatchCallback(self, items):
+        for item in items:
+            track = item['track']
+            releaseDate = track['album']['release_date']
+            year = int(re.match(r'.*([1-3][0-9]{3})', releaseDate).group())
+            if year >= self.yearStart and year <= self.yearEnd:
+                uri = self.spotify.getSongUriFromTrack(track)
+                self.matches.append(uri)
+
+
 if __name__ == "__main__":
     # update Recents Playlist 
-    # recents = RecentPlaylist()
-    # recents.update()
+    recents = RecentPlaylist()
+    recents.update()
 
-    # update artist playlist
-    playlistId = 1
-    manager = PlaylistManager(playlistId)
-    manager.update()
+    # update playlist
+    # playlistId = 4
+    # manager = PlaylistManager(playlistId)
+    # manager.update()
 
